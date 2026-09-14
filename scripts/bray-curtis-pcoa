@@ -1,0 +1,217 @@
+# ============================================================
+# BRAY-CURTIS PCoA: Species Distribution Across Ecological Zones
+# ============================================================
+#
+# Question:
+# Which tree species have similar abundance/distribution
+# profiles across the five ecological zones?
+#
+# Rows    = species
+# Columns = ecological zones
+# Values  = total species counts
+#
+# Bray-Curtis distance is calculated BETWEEN SPECIES.
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. Install packages if needed
+# ------------------------------------------------------------
+
+# install.packages(c("vegan", "ggplot2", "ggrepel"))
+
+
+library(vegan)
+library(ggplot2)
+library(ggrepel)
+
+
+# ------------------------------------------------------------
+# 2. Read data
+# ------------------------------------------------------------
+
+data <- read.csv(
+  "cumulative-2025.csv",
+  check.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 3. Create species × zone abundance matrix
+# ------------------------------------------------------------
+# Create genus + species label
+data$species_label <- paste(data$genus, data$species, sep = " ")
+
+# Replace these column names if necessary
+species_col <- "species_label"
+zone_col    <- "Zone"
+count_col   <- "count"
+
+
+matrix <- xtabs(
+  data[[count_col]] ~ data[[species_col]] + data[[zone_col]]
+)
+
+matrix <- as.matrix(matrix)
+
+
+# ------------------------------------------------------------
+# 4. Remove species with zero total abundance
+# ------------------------------------------------------------
+
+matrix <- matrix[
+  rowSums(matrix) > 0,
+  ,
+  drop = FALSE
+]
+
+
+# ------------------------------------------------------------
+# 5. Bray-Curtis dissimilarity
+# ------------------------------------------------------------
+
+# Each row = one species
+# Each column = one ecological zone
+
+bray <- vegdist(
+  matrix,
+  method = "bray"
+)
+
+
+# ------------------------------------------------------------
+# 6. Classical PCoA
+# ------------------------------------------------------------
+
+pcoa <- cmdscale(
+  bray,
+  k = 2,
+  eig = TRUE,
+  add = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 7. Extract PCoA coordinates
+# ------------------------------------------------------------
+
+pcoa_points <- as.data.frame(
+  pcoa$points
+)
+
+colnames(pcoa_points) <- c(
+  "PCoA1",
+  "PCoA2"
+)
+
+pcoa_points$Species <- rownames(pcoa_points)
+
+
+# ------------------------------------------------------------
+# 8. Identify dominant zone for each species
+# ------------------------------------------------------------
+
+dominant_zone <- apply(
+  matrix,
+  1,
+  function(x) {
+    colnames(matrix)[which.max(x)]
+  }
+)
+
+pcoa_points$dominant_zone <- dominant_zone
+
+
+# ------------------------------------------------------------
+# 9. Calculate percentage represented by PCoA axes
+# ------------------------------------------------------------
+
+# Classical PCoA can produce negative eigenvalues.
+# Here we calculate the percentage using the positive
+# eigenvalues, matching the approach used previously.
+
+positive_eigenvalues <- pcoa$eig[
+  pcoa$eig > 0
+]
+
+PCoA1 <- round(
+  pcoa$eig[1] /
+    sum(positive_eigenvalues) * 100,
+  1
+)
+
+PCoA2 <- round(
+  pcoa$eig[2] /
+    sum(positive_eigenvalues) * 100,
+  1
+)
+
+
+# ------------------------------------------------------------
+# 10. PCoA plot
+# ------------------------------------------------------------
+
+p <- ggplot(
+  pcoa_points,
+  aes(
+    x = PCoA1,
+    y = PCoA2,
+    colour = dominant_zone
+  )
+) +
+
+  geom_point(
+    size = 3.5
+  ) +
+
+  geom_text_repel(
+    aes(label = Species),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+
+  theme_classic() +
+
+  labs(
+    title = "Bray-Curtis PCoA of Species Distribution Across Ecological Zones",
+    x = paste0("PCoA1 (", PCoA1, "%)"),
+    y = paste0("PCoA2 (", PCoA2, "%)"),
+    colour = "Dominant zone"
+  )
+
+
+print(p)
+
+
+# ------------------------------------------------------------
+# 11. Save figure
+# ------------------------------------------------------------
+
+ggsave(
+  "bray_curtis_pcoa_species_distribution.png",
+  plot = p,
+  width = 10,
+  height = 8,
+  dpi = 300
+)
+
+
+# ------------------------------------------------------------
+# 12. Save PCoA coordinates
+# ------------------------------------------------------------
+
+write.csv(
+  pcoa_points,
+  "bray_curtis_pcoa_species_coordinates.csv",
+  row.names = FALSE
+)
